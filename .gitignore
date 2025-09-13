@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+uv.lock
 lib64/
 parts/
 sdist/

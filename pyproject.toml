@@ -1,0 +1,17 @@
+[project]
+name = "options-exploration"
+version = "0.1.0"
+description = "Options exploration with data science tools"
+authors = [
+    { name = "Ryan" }
+]
+requires-python = ">=3.12"
+
+dependencies = [
+    "scikit-learn",
+    "polars",
+    "pandas",
+    "numpy",
+    "scipy",
+    "tensorflow"
+]
