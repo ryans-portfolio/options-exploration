@@ -16,5 +16,6 @@ dependencies = [
     "tensorflow",
     "jupyterlab",
     "plotly",
-    "snakeviz"
+    "snakeviz",
+    "pyarrow"
 ]

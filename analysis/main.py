@@ -5,15 +5,19 @@ import random
 import pathlib
 import os
 
+from lotto import LottoTicket
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 this_dir = pathlib.Path(__file__).parent.resolve()
-data_dir = os.path.join(this_dir, "..", "data")
-trades_dir = os.path.join(data_dir, "2025")
-output_dir = os.path.join(data_dir, "output")
-root_dir = os.path.join(this_dir, "..")
+data_dir = this_dir / ".." / "data"
+trades_dir = data_dir /  "2025"
+output_dir = data_dir / "output"
+root_dir = this_dir / ".."
 
 
-def read_csvs(dir_path: str, random_sample: int | None = None, filter_func = None) -> pl.DataFrame:
-    csv_files = list(pathlib.Path(dir_path).rglob("*.csv.gz"))     
+def read_csvs(csv_files: list, random_sample: int | None = None, filter_func = None) -> pl.DataFrame: 
     if random_sample is not None:
         csv_files = random.sample(csv_files, random_sample)
 
@@ -68,26 +72,74 @@ def filter_df_by_col(filter_dict: dict) -> callable:
         for col, values in filter_dict.items():
             df = df.filter(pl.col(col).is_in(values))
         return df
-    return filter_func 
+    return filter_func
 
+def entry_generator(data: pl.DataFrame):
+    data = data.with_columns(
+        pl.col("datetime").dt.round('30m').alias('RoundedTime')
+    )
+
+    entries = data.group_by(['ticker', 'RoundedTime']).agg([
+        pl.col('price').median().alias('entry_price'),
+        pl.col('datetime').first().alias('entry_dt'),
+    ])
+    
+    entries = entries.select(['ticker','entry_price','entry_dt']).to_dicts()
+
+    for i, entry in enumerate(entries):
+        df = data.filter(
+            (pl.col('ticker') == entry['ticker']) & 
+            (pl.col('datetime') > entry['entry_dt'])
+        ).sort('datetime')
+        df = df.with_columns(
+            (pl.col('price') / entry['entry_price'] - 1).alias('return'),
+            pl.lit(entry['entry_dt']).alias('entry_dt'),
+            pl.lit(entry['entry_price']).alias('entry_price'),
+        )
+        if df.is_empty():
+            continue
+        if (df['size'].sum() > 2000) & (df['entry_price'][0] < 0.75) & (df['entry_price'][0] > 0.04) & (df.height > 100):
+            yield df
+        # if i > 100000:
+        #     break
+
+def test_point(entry: pl.DataFrame):
+    l = LottoTicket(entry)
+    stats = l.return_stats()
+    stats['entry_price'] = l.entry_price
+    return stats
 
 if __name__ == "__main__":
     import cProfile
+    import multiprocessing as mp
 
-    pr = cProfile.Profile()
-    pr.enable()
+    # pr = cProfile.Profile()
+    # pr.enable()
 
     filter_dict = {
-        "symbol": ["SPY", "SPX"],
+        "symbol": ["SPY"],
         "cp": ["C"],
     }
 
     filter_function = filter_df_by_col(filter_dict=filter_dict)
 
-    df = read_csvs(trades_dir, random_sample=10, filter_func=filter_function)
+    last_10 = list(trades_dir.rglob('*.csv.gz'))
+    last_10.sort(reverse=True)  # Sort files by name (newest first)
+    last_10 = last_10[0:10]
+    print(last_10)
 
-    print(df)
+    df = read_csvs(last_10, filter_func=filter_function)
 
-    pr.disable()
-    pr.dump_stats(os.path.join(root_dir, "profile_stats.prof"))
+    p = mp.Pool(mp.cpu_count())
+    testpoints = p.map(test_point, entry_generator(df))
+    
+    data = pl.DataFrame(testpoints)
+    print(data)
+    data.write_parquet(output_dir / "recent_spy.parquet")
+
+    fig = px.scatter_3d(data, x='entry_price', y='std', z='75%', color='median', hover_data=['entry_price', 'mean', 'std', 'min', 'max'])
+    fig.show(renderer="browser")
+
+    # pr.disable()
+    # pr.dump_stats(os.path.join(root_dir, "profile_stats.prof"))
 
