@@ -84,24 +84,25 @@ def entry_generator(data: pl.DataFrame):
         pl.col('datetime').first().alias('entry_dt'),
     ])
     
-    entries = entries.select(['ticker','entry_price','entry_dt']).to_dicts()
-
-    for i, entry in enumerate(entries):
-        df = data.filter(
-            (pl.col('ticker') == entry['ticker']) & 
-            (pl.col('datetime') > entry['entry_dt'])
-        ).sort('datetime')
-        df = df.with_columns(
-            (pl.col('price') / entry['entry_price'] - 1).alias('return'),
-            pl.lit(entry['entry_dt']).alias('entry_dt'),
-            pl.lit(entry['entry_price']).alias('entry_price'),
-        )
-        if df.is_empty():
-            continue
-        if (df['size'].sum() > 2000) & (df['entry_price'][0] < 0.75) & (df['entry_price'][0] > 0.04) & (df.height > 100):
-            yield df
-        # if i > 100000:
-        #     break
+    for ticker, group in data.group_by('ticker'):
+        entries_t = entries.filter(pl.col('ticker') == ticker[0])
+        entries_t = entries_t.select(['ticker','entry_price','entry_dt']).to_dicts()
+        for i, entry in enumerate(entries_t):
+            df = group.filter(
+                (pl.col('ticker') == entry['ticker']) & 
+                (pl.col('datetime') > entry['entry_dt'])
+            ).sort('datetime')
+            df = df.with_columns(
+                (pl.col('price') / entry['entry_price'] - 1).alias('return'),
+                pl.lit(entry['entry_dt']).alias('entry_dt'),
+                pl.lit(entry['entry_price']).alias('entry_price'),
+            )
+            if df.is_empty():
+                continue
+            if (df['size'].sum() > 2000) & (df['entry_price'][0] < 1) & (df['entry_price'][0] > 0.04) & (df.height > 100):
+                yield df
+            # if i > 100000:
+            #     break
 
 def test_point(entry: pl.DataFrame):
     l = LottoTicket(entry)
@@ -130,6 +131,7 @@ if __name__ == "__main__":
 
     df = read_csvs(last_10, filter_func=filter_function)
 
+
     p = mp.Pool(mp.cpu_count())
     testpoints = p.map(test_point, entry_generator(df))
     
@@ -140,6 +142,6 @@ if __name__ == "__main__":
     fig = px.scatter_3d(data, x='entry_price', y='std', z='75%', color='median', hover_data=['entry_price', 'mean', 'std', 'min', 'max'])
     fig.show(renderer="browser")
 
-    # pr.disable()
+    # pr.disable() 
     # pr.dump_stats(os.path.join(root_dir, "profile_stats.prof"))
 
